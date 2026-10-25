@@ -10,6 +10,7 @@
  * 本插件只当“手”，不当“腿”。
  */
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -60,6 +61,12 @@ const 默认配置 = {
   qzonePrompt: '',
   qzoneEveryMinMin: 120,
   qzoneEveryMinMax: 240,
+  // 发完消息要不要考虑配表情包
+  stickerOnReply: true,
+  // 收到图要不要鉴定一下、收进表情库
+  autoTagStickers: true,
+  // 上限开关：true = 不限条数（有些场景确实需要）
+  limitsUnlimited: false,
   // 人设：留空则用中性说明；填了就把这段当作"你是谁"交给会话
   persona: '',
   // DSH 启动时自动把 NapCat 拉起来（免扫码，用 -q 快速登录）
@@ -101,6 +108,36 @@ function 读账(账本) {
 function 记账(账本, 目标, 摘要) {
   mkdirSync(join(账本, '..'), { recursive: true });
   appendFileSync(账本, `${Date.now() / 1000}\t${目标}\t${String(摘要).slice(0, 60).replace(/\s+/g, ' ')}\n`, 'utf8');
+}
+
+/** 表情包库：<home>/stickers.json，按标签存，按标签取。 */
+function 表情库文件() {
+  return join(家目录(), 'stickers.json');
+}
+
+function 读表情库() {
+  try {
+    const 文件 = 表情库文件();
+    if (!existsSync(文件)) return [];
+    const 体 = JSON.parse(readFileSync(文件, 'utf8').replace(/^\uFEFF/, ''));
+    return Array.isArray(体) ? 体 : [];
+  } catch {
+    return [];
+  }
+}
+
+function 写表情库(列表) {
+  mkdirSync(家目录(), { recursive: true });
+  writeFileSync(表情库文件(), JSON.stringify(列表, null, 2), 'utf8');
+}
+
+function 文件指纹(路径) {
+  try {
+    const 数据 = readFileSync(路径);
+    return createHash('sha1').update(数据).digest('hex').slice(0, 16);
+  } catch {
+    return '';
+  }
 }
 
 const 工具输出 = (字段, 渲染) => ({
@@ -291,6 +328,19 @@ export function apply(ctx, 配置) {
     return `${人设}\n（同一个工作区、同一份记忆，memory/ 下的文件随时可看。）`;
   }
 
+  /** 收到图之后：值不值得收进表情库，让它自己判断。 */
+  function 鉴定表情包(记录) {
+    if (c.autoTagStickers === false) return;
+    const 图 = (记录.attachments ?? []).filter((a) => a.path).map((a) => a.path);
+    if (图.length === 0) return;
+    const 清单 = 图.map((p) => `- ${p}`).join('\n');
+    投递到会话(
+      `【表情包鉴定】${记录.name} 刚发来 ${图.length} 张图：\n${清单}\n\n` +
+        `用 read_image 看一眼。**值得收**就用 qq_tag_sticker 打两个标签（mood 一个词：笑/无语/惊讶/得意…；use 一个词：接梗/收尾/耍赖/安慰…），note 写一句"这图长什么样"，方便以后匹配。\n` +
+        `不值得（重复的、糊的、没意思的、涉及真人的照片）就什么都不做，直接结束。别为了凑数收。`,
+    );
+  }
+
   /** 把来信投给 QQ 专用会话，让那边的 agent 去回。失败只记日志，不影响收消息。 */
   function 自动回复(记录) {
     记调试(
@@ -331,7 +381,10 @@ export function apply(ctx, 配置) {
     const 提示 =
       `【QQ ${是群 ? `群 ${记录.group} 里被点名` : '来信'}】${记录.name}（${记录.from}）在 ${记录.t} 说：${描述}\n\n` +
       `${身份说明()}\n` +
-      `用 qq_send 回给 ${回哪里}${是群 ? '（群里只回一句，别接着聊）' : '，一句就够'}，短，像平时说话那样，别解释你在做什么。回完就停。`;
+      `用 qq_send 回给 ${回哪里}${是群 ? '（群里只回一句，别接着聊）' : '，一句就够'}，短，像平时说话那样，别解释你在做什么。回完就停。` +
+      (c.stickerOnReply === false
+        ? ''
+        : `\n如果这句适合配一张图，可以先用 qq_pick_sticker 按情绪/用途挑一张；挑到了就用 qq_send 的 image 发出去，挑不到就别配——一张不配比配错好。`);
     const 等待 = c.replyDelayMinMs + Math.random() * Math.max(0, c.replyDelayMaxMs - c.replyDelayMinMs);
     const 记忆 = 读记忆片段();
     记调试(`收到来信，${Math.round(等待)}ms 后投给 QQ 专用会话 ${c.sessionId}（记忆 ${记忆.length} 字）`);
@@ -528,6 +581,7 @@ export function apply(ctx, 配置) {
         记一条(记录);
         记群消息(记录);
         自动回复(记录);
+        鉴定表情包(记录);
       } catch (e) {
         记调试(`处理消息时出错：${e?.message ?? e}`);
       }
@@ -734,6 +788,9 @@ export function apply(ctx, 配置) {
             groupActiveWindowMin: Number(c.groupActiveWindowMin ?? 5),
             groupCooldownMin: Number(c.groupCooldownMin ?? 10),
             groupPerDay: Number(c.groupPerDay ?? 20),
+            limitsUnlimited: c.limitsUnlimited === true,
+            stickerOnReply: c.stickerOnReply !== false,
+            autoTagStickers: c.autoTagStickers !== false,
             perHour: Number(c.perHour ?? 20),
             perDay: Number(c.perDay ?? 60),
             sentToday: 记录.filter((t) => 现在 - t < 86400).length,
@@ -760,6 +817,9 @@ export function apply(ctx, 配置) {
           if (Number.isFinite(想要.everyMinMax)) patch.proactiveEveryMinMax = Math.max(5, Math.round(Number(想要.everyMinMax)));
           if (Number.isFinite(想要.perHour)) patch.perHour = Math.min(200, Math.max(1, Math.round(Number(想要.perHour))));
           if (Number.isFinite(想要.perDay)) patch.perDay = Math.min(1000, Math.max(1, Math.round(Number(想要.perDay))));
+          if (typeof 想要.limitsUnlimited === 'boolean') patch.limitsUnlimited = 想要.limitsUnlimited;
+          if (typeof 想要.stickerOnReply === 'boolean') patch.stickerOnReply = 想要.stickerOnReply;
+          if (typeof 想要.autoTagStickers === 'boolean') patch.autoTagStickers = 想要.autoTagStickers;
           if (typeof 想要.persona === 'string') patch.persona = 想要.persona.slice(0, 2000);
           if (typeof 想要.qzoneAuto === 'boolean') patch.qzoneAuto = 想要.qzoneAuto;
           if (typeof 想要.qzonePrompt === 'string') patch.qzonePrompt = 想要.qzonePrompt.slice(0, 2000);
@@ -837,6 +897,7 @@ export function apply(ctx, 配置) {
   }
 
   function 查额度() {
+    if (c.limitsUnlimited === true) return '';
     const 现在 = Date.now() / 1000;
     const 记录 = 读账(账本);
     const 一小时 = 记录.filter((t) => 现在 - t < 3600).length;
@@ -987,7 +1048,7 @@ export function apply(ctx, 配置) {
     ctx.tools.register({
       name: 'qq_stickers',
       description:
-        '列出手里攒着的图（别人发来的表情包都自动存在本地）。拿到路径就能用 qq_send 的 image 发出去。',
+        '列出手里攒着的图，带标签（mood/use/note）。拿到路径就能用 qq_send 的 image 发出去。',
       parameters: {
         type: 'object',
         properties: {
@@ -1003,6 +1064,15 @@ export function apply(ctx, 配置) {
       async execute(args) {
         const 数量 = Math.min(Math.max(Number(args?.count ?? 10), 1), 50);
         try {
+          const 库 = 读表情库();
+          if (库.length > 0) {
+            const 行 = 库
+              .slice(-数量)
+              .reverse()
+              .map((x) => `[${x.mood ?? '?'}/${x.use ?? '?'}] ${x.note ? x.note + '｜' : ''}${x.path}`);
+            return { ok: true, lines: 行 };
+          }
+          // 还没打标签的，至少把文件列出来
           const 目录 = join(家目录(), 'media');
           if (!existsSync(目录)) return { ok: true, lines: [] };
           const 文件 = readdirSync(目录)
@@ -1018,6 +1088,81 @@ export function apply(ctx, 配置) {
         } catch (e) {
           return { ok: false, lines: [], reason: e.message };
         }
+      },
+    }),
+  );
+
+  // ---------- qq_tag_sticker ----------
+  ctx.effect(() =>
+    ctx.tools.register({
+      name: 'qq_tag_sticker',
+      description:
+        '把一张图收进自己的表情包库并打标签。值得收才收——重复的、没意思的、看不清的就别收。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '图片本地路径' },
+          mood: { type: 'string', description: '情绪：笑 / 敷衍 / 惊讶 / 无语 / 得意 …' },
+          use: { type: 'string', description: '用在哪儿：接梗 / 收尾 / 耍赖 / 安慰 …' },
+          note: { type: 'string', description: '一句话说明这张图长什么样，方便以后匹配' },
+        },
+        required: ['path', 'mood'],
+        additionalProperties: false,
+      },
+      output: 工具输出({ added: { type: 'boolean' } }, (v) =>
+        v.ok ? (v.added ? '收进库了。' : '库里已经有这张，没重复加。') : `没存成：${v.reason ?? '未知原因'}`,
+      ),
+      async execute(args) {
+        const 路径 = String(args?.path ?? '').trim();
+        if (!路径 || !existsSync(路径)) return { ok: false, added: false, reason: '找不到这张图' };
+        const 指纹 = 文件指纹(路径);
+        const 库 = 读表情库();
+        if (指纹 && 库.some((x) => x.hash === 指纹)) return { ok: true, added: false };
+        const 条目 = {
+          path: 路径,
+          hash: 指纹,
+          mood: String(args?.mood ?? '').slice(0, 20),
+          use: String(args?.use ?? '').slice(0, 20),
+          note: String(args?.note ?? '').slice(0, 80),
+          addedAt: new Date().toISOString(),
+        };
+        库.push(条目);
+        写表情库(库);
+        记调试(`表情入库：${条目.mood}/${条目.use} ${路径}`);
+        return { ok: true, added: true };
+      },
+    }),
+  );
+
+  // ---------- qq_pick_sticker ----------
+  ctx.effect(() =>
+    ctx.tools.register({
+      name: 'qq_pick_sticker',
+      description:
+        '从表情包库里挑一张合适的（按情绪和用途匹配）。没有合适的会明说，别硬凑。',
+      parameters: {
+        type: 'object',
+        properties: {
+          mood: { type: 'string', description: '想要的情绪，比如 笑 / 无语 / 得意' },
+          use: { type: 'string', description: '用在哪，比如 接梗 / 收尾 / 耍赖' },
+        },
+        additionalProperties: false,
+      },
+      output: 工具输出({ path: { type: 'string' } }, (v) =>
+        v.ok ? (v.path ? `挑到这张：${v.path}` : `没挑到合适的：${v.reason ?? '库里没有匹配的'}`) : `挑不出来：${v.reason ?? '未知原因'}`,
+      ),
+      async execute(args) {
+        const 库 = 读表情库();
+        if (库.length === 0) return { ok: false, path: '', reason: '表情库还是空的' };
+        const 情绪 = String(args?.mood ?? '').trim();
+        const 用途 = String(args?.use ?? '').trim();
+        const 命中 = 库.filter(
+          (x) => (!情绪 || x.mood === 情绪) && (!用途 || x.use === 用途),
+        );
+        const 池 = 命中.length > 0 ? 命中 : [];
+        if (池.length === 0) return { ok: true, path: '', reason: '库里没有这个组合' };
+        const 选 = 池[Math.floor(Math.random() * 池.length)];
+        return { ok: true, path: 选.path };
       },
     }),
   );

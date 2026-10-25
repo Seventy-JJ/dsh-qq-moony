@@ -473,6 +473,39 @@ window.__ModuleLoader__.load({
         ),
         h(
           'div',
+          { style: { ...卡片 } },
+          h(
+            'div',
+            null,
+            h('div', { style: 标题 }, '不限条数'),
+            h('div', { style: 说明 }, '关掉每小时/每天的上限。⚠️ 只在确实需要时开——额度是防封的第一道闸'),
+          ),
+          h(开关, { 开: 状态.limitsUnlimited, 点: () => 改({ limitsUnlimited: !状态.limitsUnlimited }) }),
+        ),
+        h(
+          'div',
+          { style: { ...卡片 } },
+          h(
+            'div',
+            null,
+            h('div', { style: 标题 }, '配表情包'),
+            h('div', { style: 说明 }, '回话时如果合适，自己从库里挑一张一起发'),
+          ),
+          h(开关, { 开: 状态.stickerOnReply, 点: () => 改({ stickerOnReply: !状态.stickerOnReply }) }),
+        ),
+        h(
+          'div',
+          { style: { ...卡片 } },
+          h(
+            'div',
+            null,
+            h('div', { style: 标题 }, '自动收录表情包'),
+            h('div', { style: 说明 }, '收到图会看一眼，值得收才收（重复、糊的、真人照片不收）'),
+          ),
+          h(开关, { 开: 状态.autoTagStickers, 点: () => 改({ autoTagStickers: !状态.autoTagStickers }) }),
+        ),
+        h(
+          'div',
           { style: { display: 'flex', justifyContent: 'flex-end', gap: '10px', alignItems: 'center' } },
           脏 ? h('span', { style: { ...说明, opacity: 0.7 } }, '还没保存') : null,
           h(
