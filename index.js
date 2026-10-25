@@ -120,6 +120,19 @@ export function apply(ctx, 配置) {
 
   ctx.logger?.info?.(`qq-moony: 接到 ${c.baseUrl}（限额 ${c.perHour}/时、${c.perDay}/天）`);
 
+  /** 体检：QQ NT 装没装、NapCat 在不在——缺东西的时候要能说清缺什么。 */
+  function 体检() {
+    const 候选 = [
+      'C:/Program Files/Tencent/QQNT/QQ.exe',
+      'C:/Program Files (x86)/Tencent/QQNT/QQ.exe',
+      join(homedir(), 'AppData/Local/Programs/QQNT/QQ.exe'),
+      'D:/Tencent/QQNT/QQ.exe',
+    ];
+    const qqnt = 候选.some((p) => existsSync(p));
+    const napcat = Boolean(c.napCatDir) && existsSync(join(c.napCatDir, 'launcher-user.bat'));
+    return { qqnt, napcat };
+  }
+
   /** DSH 起来时顺手看一眼 NapCat：没跑就自己拉起来（免扫码，用 -q 快速登录）。 */
   async function 确认NapCat在跑() {
     if (c.autoStartNapCat === false) return;
@@ -658,6 +671,8 @@ export function apply(ctx, 配置) {
             ok: true,
             online: 在线,
             nickname: 昵称,
+            qqnt: 体检().qqnt,
+            napcat: 体检().napcat,
             uin: Number(c.uin ?? 0),
             proactive: Boolean(c.proactive),
             autoReply: Boolean(c.autoReply),

@@ -1,4 +1,4 @@
-﻿window.__ModuleLoader__.load({
+window.__ModuleLoader__.load({
   id: 'dsh-qq-moony',
   factory(require) {
     const React = require('react');
@@ -152,9 +152,35 @@
         return h('div', { style: { padding: '8px 0', opacity: 0.6 } }, 错 || '读状态中…');
       }
 
+      const 缺口 = [];
+      if (!状态.qqnt) 缺口.push('没找到 QQ NT —— 去 im.qq.com 装新版（9.9.x）。老版 9.7 注不进去，这是死条件。');
+      if (!状态.napcat) 缺口.push('没找到 NapCat —— 去 github.com/NapNeko/NapCatQQ 下 Shell 版，解压后把 napCatDir 指过去。');
+      if (状态.qqnt && 状态.napcat && !状态.online)
+        缺口.push('QQ NT 和 NapCat 都在，但连不上 —— 检查 NapCat 启没启、3000 端口、token 三样。');
+
       return h(
         'div',
         null,
+        缺口.length > 0
+          ? h(
+              'div',
+              {
+                style: {
+                  ...卡片,
+                  flexDirection: 'column',
+                  alignItems: 'stretch',
+                  gap: '6px',
+                  borderColor: 'var(--dsw-alias-warning-1, #d99b2b)',
+                },
+              },
+              h(
+                'div',
+                { style: { ...标题, color: 'var(--dsw-alias-warning-1, #d99b2b)' } },
+                '还差几步才能用',
+              ),
+              缺口.map((行, i) => h('div', { key: i, style: 说明 }, `${i + 1}. ${行}`)),
+            )
+          : null,
         h(
           'div',
           { style: { ...卡片 } },
