@@ -166,6 +166,7 @@ export function apply(ctx, 配置) {
   const 账本 = join(家目录(), 'sent.log');
   const 收件箱 = join(家目录(), 'inbox.jsonl');
   const 轮次账 = join(家目录(), 'rounds.log');
+  const 说说账 = join(家目录(), 'qzone.jsonl');
 
   ctx.logger?.info?.(`qq-moony: 接到 ${c.baseUrl}（限额 ${c.perHour}/时、${c.perDay}/天）`);
 
@@ -1252,6 +1253,50 @@ export function apply(ctx, 配置) {
     }),
   );
 
+  // ---------- qq_qzone_history ----------
+  ctx.effect(() =>
+    ctx.tools.register({
+      name: 'qq_qzone_history',
+      name_display: '说说账本',
+      description:
+        '看自己发过哪些说说（本地账本，不读空间接口）。返回时间、内容和条数。',
+      parameters: {
+        type: 'object',
+        properties: {
+          count: { type: 'number', description: '要几条，默认 10' },
+        },
+        additionalProperties: false,
+      },
+      output: 工具输出({ lines: { type: 'array', items: { type: 'string' } } }, (v) => {
+        if (!v.ok) return `读不到：${v.reason ?? '未知原因'}`;
+        if (!v.lines || v.lines.length === 0) return '这个账本还是空的——还没发过说说。';
+        return v.lines.join('\n');
+      }),
+      async execute(args) {
+        const 数量 = Math.min(Math.max(Number(args?.count ?? 10), 1), 50);
+        try {
+          if (!existsSync(说说账)) return { ok: true, lines: [] };
+          const 行 = readFileSync(说说账, 'utf8')
+            .split('\n')
+            .filter(Boolean)
+            .slice(-数量)
+            .reverse()
+            .map((s) => {
+              try {
+                const x = JSON.parse(s);
+                return `${x.t.slice(0, 16).replace('T', ' ')}｜${x.content.replace(/\n/g, ' ')}`;
+              } catch {
+                return s;
+              }
+            });
+          return { ok: true, lines: 行 };
+        } catch (e) {
+          return { ok: false, lines: [], reason: e.message };
+        }
+      },
+    }),
+  );
+
   // ---------- qq_qzone ----------
   ctx.effect(() =>
     ctx.tools.register({
@@ -1275,7 +1320,14 @@ export function apply(ctx, 配置) {
         try {
           const r = await 调('send_qzone_msg', { content: 正文 });
           记账(账本, 'qzone', 正文);
-          return { ok: true, tid: String(r.data?.tid ?? '') };
+          const tid = String(r.data?.tid ?? '');
+          try {
+            mkdirSync(家目录(), { recursive: true });
+            appendFileSync(说说账, JSON.stringify({ t: new Date().toISOString(), tid, content: 正文 }) + '\n', 'utf8');
+          } catch {
+            /* 记账失败不影响发出去 */
+          }
+          return { ok: true, tid };
         } catch (e) {
           return { ok: false, tid: '', reason: e.message };
         }
