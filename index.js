@@ -61,6 +61,13 @@ const 默认配置 = {
   qzonePrompt: '',
   qzoneEveryMinMin: 120,
   qzoneEveryMinMax: 240,
+  // 一轮回复拆成几条发（像人一句一句说）
+  splitReply: true,
+  maxMessagesPerRound: 4,
+  splitGapMinMs: 1000,
+  splitGapMaxMs: 3000,
+  // 技术限速：不管几轮，每分钟最多几条（防封兜底）
+  perMinute: 6,
   // 发完消息要不要考虑配表情包
   stickerOnReply: true,
   // 表情库最多存几张（超了淘汰最旧的记录，不动原文件）
@@ -158,6 +165,7 @@ export function apply(ctx, 配置) {
   const c = { ...默认配置, ...(配置 ?? {}), ...读取本地配置() };
   const 账本 = join(家目录(), 'sent.log');
   const 收件箱 = join(家目录(), 'inbox.jsonl');
+  const 轮次账 = join(家目录(), 'rounds.log');
 
   ctx.logger?.info?.(`qq-moony: 接到 ${c.baseUrl}（限额 ${c.perHour}/时、${c.perDay}/天）`);
 
@@ -692,9 +700,9 @@ export function apply(ctx, 配置) {
     const 记忆 = 读记忆片段();
     记调试(`主动模式：给它一次说话的机会（下一次排在 ${Math.round(下次.分钟)} 分钟后）`);
     投递到会话(
-      `【主动】现在没有人在找你。你可以主动给 ${目标} 发一句话，也可以什么都不发。\n` +
+      `【主动】现在没有人在找你。你可以主动给 ${目标} 发一句话——**一句就够**，短到一个词、一个感叹号、一个颜文字都行，也可以配一张表情包。\n` +
         `想发就用 qq_send；不想发就直接结束这一轮，不用解释。\n` +
-        `别每次都发，也别发天气预报那种东西。${记忆 ? `\n\n${记忆}` : ''}`,
+        `别每次都同一句，也别发天气预报那种东西。${记忆 ? `\n\n${记忆}` : ''}`,
     );
   }, 60000);
 
@@ -793,6 +801,9 @@ export function apply(ctx, 配置) {
             limitsUnlimited: c.limitsUnlimited === true,
             stickerOnReply: c.stickerOnReply !== false,
             autoTagStickers: c.autoTagStickers !== false,
+            splitReply: c.splitReply !== false,
+            maxPerRound: Number(c.maxMessagesPerRound ?? 4),
+            perMinute: Number(c.perMinute ?? 6),
             stickerLimit: Number(c.stickerLimit ?? 200),
             stickerCount: 读表情库().length,
             perHour: Number(c.perHour ?? 20),
@@ -824,6 +835,9 @@ export function apply(ctx, 配置) {
           if (typeof 想要.limitsUnlimited === 'boolean') patch.limitsUnlimited = 想要.limitsUnlimited;
           if (typeof 想要.stickerOnReply === 'boolean') patch.stickerOnReply = 想要.stickerOnReply;
           if (typeof 想要.autoTagStickers === 'boolean') patch.autoTagStickers = 想要.autoTagStickers;
+          if (typeof 想要.splitReply === 'boolean') patch.splitReply = 想要.splitReply;
+          if (Number.isFinite(想要.maxPerRound)) patch.maxMessagesPerRound = Math.min(8, Math.max(1, Math.round(Number(想要.maxPerRound))));
+          if (Number.isFinite(想要.perMinute)) patch.perMinute = Math.min(60, Math.max(1, Math.round(Number(想要.perMinute))));
           if (Number.isFinite(想要.stickerLimit)) patch.stickerLimit = Math.min(2000, Math.max(1, Math.round(Number(想要.stickerLimit))));
           if (typeof 想要.persona === 'string') patch.persona = 想要.persona.slice(0, 2000);
           if (typeof 想要.qzoneAuto === 'boolean') patch.qzoneAuto = 想要.qzoneAuto;
@@ -905,11 +919,53 @@ export function apply(ctx, 配置) {
     if (c.limitsUnlimited === true) return '';
     const 现在 = Date.now() / 1000;
     const 记录 = 读账(账本);
+    const 一分钟 = 记录.filter((t) => 现在 - t < 60).length;
+    const 上限分钟 = Math.max(1, Number(c.perMinute ?? 6));
+    if (一分钟 >= 上限分钟) return `这一分钟已经发了 ${一分钟} 条，喘口气再说`;
     const 一小时 = 记录.filter((t) => 现在 - t < 3600).length;
     const 一天 = 记录.filter((t) => 现在 - t < 86400).length;
+    // 小时/天的额度按「轮」算（拆条模式下），分钟的硬上限永远按「条」算
+    const 轮记录 = 读账(轮次账);
+    const 轮小时 = 轮记录.filter((t) => 现在 - t < 3600).length;
+    const 轮一天 = 轮记录.filter((t) => 现在 - t < 86400).length;
+    if (c.splitReply !== false) {
+      if (轮小时 >= c.perHour) return `这一小时已经回了 ${轮小时} 轮，到顶了，等会儿再说`;
+      if (轮一天 >= c.perDay) return `今天已经回了 ${轮一天} 轮，到顶了，明天再聊`;
+      return '';
+    }
     if (一小时 >= c.perHour) return `这一小时已经发了 ${一小时} 条，到顶了，等会儿再说`;
     if (一天 >= c.perDay) return `今天已经发了 ${一天} 条，到顶了，明天再聊`;
     return '';
+  }
+
+  /** 把一段话拆成该分开发的小句：标点断句、太短的并进上一句、最多 N 条。 */
+  function 拆成小段(整段) {
+    const 原文 = String(整段 ?? '').trim();
+    if (!原文) return [];
+    if (c.splitReply === false) return [原文];
+    const 最多 = Math.max(1, Math.min(8, Number(c.maxMessagesPerRound ?? 4)));
+    // 按句末标点或换行断
+    const 粗切 = 原文
+      .split(/(?<=[。！？!?…~\n])/u)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const 结果 = [];
+    for (const 句 of 粗切) {
+      // 太短的（"哦。""！"）并进上一句，除非上一句已经够长
+      if (结果.length > 0 && 句.length <= 2 && 结果[结果.length - 1].length < 30) {
+        结果[结果.length - 1] += 句;
+      } else {
+        结果.push(句);
+      }
+    }
+    // 超上限：把多出来的并到最后一条
+    if (结果.length > 最多) {
+      const 头 = 结果.slice(0, 最多 - 1);
+      const 尾 = 结果.slice(最多 - 1).join('');
+      头.push(尾);
+      return 头;
+    }
+    return 结果;
   }
 
   const 睡眠 = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -982,22 +1038,42 @@ export function apply(ctx, 配置) {
         if (!Number.isFinite(号) || 号 <= 0) return { ok: false, messageId: 0, reason: '目标不是有效号码' };
 
         const 消息 = [];
-        if (正文) 消息.push({ type: 'text', data: { text: 正文 } });
+        const 段们 = 正文 ? 拆成小段(正文) : [];
+        if (段们.length === 0 && 正文) 段们.push(正文);
         if (图) {
           if (!existsSync(图)) return { ok: false, messageId: 0, reason: `找不到这张图：${图}` };
-          消息.push({ type: 'image', data: { file: 图.startsWith('file://') ? 图 : `file:///${图.replace(/\\/g, '/')}` } });
         }
 
-        const 等待 = c.minDelayMs + Math.random() * Math.max(0, c.maxDelayMs - c.minDelayMs);
-        await 睡眠(等待);
+        const 重试等待 = () => c.minDelayMs + Math.random() * Math.max(0, c.maxDelayMs - c.minDelayMs);
+        const 段间隔 = () =>
+          Math.max(0, Number(c.splitGapMinMs ?? 1000)) +
+          Math.random() * Math.max(0, Number(c.splitGapMaxMs ?? 3000) - Number(c.splitGapMinMs ?? 1000));
 
+        await 睡眠(重试等待());
+        let 最后id = 0;
         try {
-          const r = await 调(是群 ? 'send_group_msg' : 'send_private_msg', {
-            [是群 ? 'group_id' : 'user_id']: 号,
-            message: 消息,
-          });
-          记账(账本, 号, 正文 || `[图片]${图}`);
-          return { ok: true, messageId: Number(r.data?.message_id ?? 0) };
+          // 一句一句发，像人说话
+          for (let i = 0; i < 段们.length; i += 1) {
+            if (i > 0) await 睡眠(段间隔());
+            const r = await 调(是群 ? 'send_group_msg' : 'send_private_msg', {
+              [是群 ? 'group_id' : 'user_id']: 号,
+              message: [{ type: 'text', data: { text: 段们[i] } }],
+            });
+            最后id = Number(r.data?.message_id ?? 0);
+            记账(账本, 号, 段们[i]);
+          }
+          if (图) {
+            if (段们.length > 0) await 睡眠(段间隔());
+            const r = await 调(是群 ? 'send_group_msg' : 'send_private_msg', {
+              [是群 ? 'group_id' : 'user_id']: 号,
+              message: [{ type: 'image', data: { file: 图.startsWith('file://') ? 图 : `file:///${图.replace(/\\/g, '/')}` } }],
+            });
+            最后id = Number(r.data?.message_id ?? 0);
+            记账(账本, 号, `[图片]${图}`);
+          }
+          // 一轮只记一份轮次额度
+          记账(轮次账, 号, 段们.join('') || '[图片]');
+          return { ok: true, messageId: 最后id, parts: 段们.length + (图 ? 1 : 0) };
         } catch (e) {
           return { ok: false, messageId: 0, reason: e.message };
         }
