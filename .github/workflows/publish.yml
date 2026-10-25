@@ -1,0 +1,33 @@
+name: publish
+
+# 推一个 v* 的 tag 就自动发到 npm。
+# 需要仓库 Secret：NPM_TOKEN（npmjs 生成的 Automation Token）。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: 语法检查
+        run: |
+          node --check index.js
+          node --check client.js
+
+      - name: 发布
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
