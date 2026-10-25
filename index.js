@@ -63,6 +63,8 @@ const 默认配置 = {
   qzoneEveryMinMax: 240,
   // 发完消息要不要考虑配表情包
   stickerOnReply: true,
+  // 表情库最多存几张（超了淘汰最旧的记录，不动原文件）
+  stickerLimit: 200,
   // 收到图要不要鉴定一下、收进表情库
   autoTagStickers: true,
   // 上限开关：true = 不限条数（有些场景确实需要）
@@ -791,6 +793,8 @@ export function apply(ctx, 配置) {
             limitsUnlimited: c.limitsUnlimited === true,
             stickerOnReply: c.stickerOnReply !== false,
             autoTagStickers: c.autoTagStickers !== false,
+            stickerLimit: Number(c.stickerLimit ?? 200),
+            stickerCount: 读表情库().length,
             perHour: Number(c.perHour ?? 20),
             perDay: Number(c.perDay ?? 60),
             sentToday: 记录.filter((t) => 现在 - t < 86400).length,
@@ -820,6 +824,7 @@ export function apply(ctx, 配置) {
           if (typeof 想要.limitsUnlimited === 'boolean') patch.limitsUnlimited = 想要.limitsUnlimited;
           if (typeof 想要.stickerOnReply === 'boolean') patch.stickerOnReply = 想要.stickerOnReply;
           if (typeof 想要.autoTagStickers === 'boolean') patch.autoTagStickers = 想要.autoTagStickers;
+          if (Number.isFinite(想要.stickerLimit)) patch.stickerLimit = Math.min(2000, Math.max(1, Math.round(Number(想要.stickerLimit))));
           if (typeof 想要.persona === 'string') patch.persona = 想要.persona.slice(0, 2000);
           if (typeof 想要.qzoneAuto === 'boolean') patch.qzoneAuto = 想要.qzoneAuto;
           if (typeof 想要.qzonePrompt === 'string') patch.qzonePrompt = 想要.qzonePrompt.slice(0, 2000);
@@ -1118,6 +1123,11 @@ export function apply(ctx, 配置) {
         const 指纹 = 文件指纹(路径);
         const 库 = 读表情库();
         if (指纹 && 库.some((x) => x.hash === 指纹)) return { ok: true, added: false };
+        const 上限 = Math.max(1, Number(c.stickerLimit ?? 200));
+        while (库.length >= 上限) {
+          const 淘汰 = 库.shift();
+          记调试(`表情库满（${上限}），淘汰最旧的：${淘汰?.path ?? '?'}`);
+        }
         const 条目 = {
           path: 路径,
           hash: 指纹,
