@@ -1,7 +1,7 @@
 name: publish
 
 # 推一个 v* 的 tag 就自动发到 npm。
-# 需要仓库 Secret：NPM_TOKEN（npmjs 生成的 Automation Token）。
+# 需要仓库 Secret：NPM_TOKEN（npmjs 生成的 token）。
 on:
   push:
     tags:
@@ -20,14 +20,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: 语法检查
         run: |
           node --check index.js
           node --check client.js
 
+      # Secret 粘进来时常常带换行或空格，直接塞进 header 会报
+      # "is not a legal HTTP header value"。这里先洗掉所有空白。
+      - name: 配置 npm 认证
+        run: |
+          TOKEN=$(printf '%s' "$NPM_TOKEN" | tr -d '[:space:]')
+          echo "//registry.npmjs.org/:_authToken=$TOKEN" > "$HOME/.npmrc"
+          echo "registry=https://registry.npmjs.org/" >> "$HOME/.npmrc"
+          echo "token 长度: ${#TOKEN}"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: 发布
         run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
