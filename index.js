@@ -817,6 +817,33 @@ export function apply(ctx, 配置) {
           return;
         }
 
+        if (路径 === '/api/qq-moony/version') {
+          let 本版 = '';
+          try {
+            本版 = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version ?? '';
+          } catch {
+            /* 读不到就空着 */
+          }
+          let 最新 = '';
+          let 说明 = '';
+          try {
+            const r = await fetch('https://registry.npmmirror.com/dsh-qq-moony/latest', {
+              signal: AbortSignal.timeout(6000),
+            });
+            const 体 = await r.json();
+            最新 = String(体?.version ?? '');
+          } catch (e) {
+            说明 = `查不到最新版：${e?.message ?? e}`;
+          }
+          发json(res, 200, {
+            ok: true,
+            installed: 本版,
+            latest: 最新,
+            hasUpdate: Boolean(本版 && 最新 && 最新 !== 本版),
+            note: 说明,
+          });
+          return;
+        }
         if (路径 === '/api/qq-moony/config' && req.method === 'POST') {
           let 体 = '';
           for await (const 块 of req) 体 += 块;

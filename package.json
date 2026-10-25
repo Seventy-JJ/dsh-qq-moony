@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq-moony",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "把 QQ 小号接进 DeepSeek Harness：收发消息、发表情包、发 QQ 空间说说、参与群聊，能自己找话题，自带启动与限速防封。",
   "keywords": [
     "dsh",

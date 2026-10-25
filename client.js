@@ -75,6 +75,7 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         刷新();
+        fetch('/api/qq-moony/version').then((r) => r.json()).then(设版本).catch(() => {});
         const 定时 = setInterval(刷新, 15000);
         return () => clearInterval(定时);
       }, [刷新]);
@@ -99,6 +100,8 @@ window.__ModuleLoader__.load({
       // 数字项走草稿：不立刻提交，等"保存更改"
       const [草稿, 设草稿] = React.useState(null);
       const [脏, 设脏] = React.useState(false);
+      const [版本, 设版本] = React.useState(null);
+      const [版本忽略, 设版本忽略] = React.useState(false);
 
       // 草稿没建起来之前，先用状态里的值兜底——省得"保存"之后闪回空白
       const 从状态取 = () => ({
@@ -172,7 +175,7 @@ window.__ModuleLoader__.load({
       else if (状态.qqnt && 状态.napcat && !状态.online)
         缺口.push('QQ NT 和 NapCat 都在，但连不上 —— 检查 NapCat 启没启、3000 端口、token 三样。');
 
-      return h(
+      const 内容 = () => h(
         'div',
         null,
         缺口.length > 0
@@ -594,6 +597,12 @@ window.__ModuleLoader__.load({
           ? h('div', { style: { ...说明, color: 'var(--dsw-alias-danger-1, #ff5d5d)' } }, 错)
           : null,
       );
+
+      try {
+        return 内容();
+      } catch (e) {
+        return h('div', { style: { padding: '8px 0' } }, '面板渲染出错：' + ((e && e.message) || e));
+      }
     }
 
     return {
