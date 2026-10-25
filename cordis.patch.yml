@@ -1,0 +1,12 @@
+# dsh-qq-moony bundle patch
+# 把本包插进 profile 的层叠配置里。装好后 profile 只要在 bundles 里列出本包即生效。
+- insert:
+    - id: qq-moony
+      name: dsh-qq-moony
+      config:
+        enabled: true
+        baseUrl: 'http://127.0.0.1:3000'
+        token: 'moony2026'
+        uin: 3595047163
+        perHour: 20
+        perDay: 60
