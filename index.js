@@ -156,14 +156,22 @@ export function apply(ctx, 配置) {
       return;
     }
     try {
-      const 子 = spawn('cmd.exe', ['/c', 'launcher-user.bat', '-q', 号码], {
-        cwd: 目录,
+      // 用 VBS 起，窗口不弹出来（cmd 的隐藏参数对批处理不管用）
+      const 启动脚本 = join(家目录(), 'start-napcat.vbs');
+      mkdirSync(家目录(), { recursive: true });
+      const 批处理 = join(目录, 'launcher-user.bat');
+      const vbs =
+        `Set sh = CreateObject("WScript.Shell")\r\n` +
+        `sh.Run "cmd /c ""${批处理}"" -q ${号码}", 0, False\r\n`;
+      // .vbs 用 UTF-16LE + BOM，中文路径才认
+      writeFileSync(启动脚本, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(vbs, 'utf16le')]));
+      const 子 = spawn('wscript.exe', [启动脚本], {
         detached: true,
         stdio: 'ignore',
         windowsHide: true,
       });
       子.unref();
-      记调试(`NapCat 没在跑，已拉起（${目录}，-q ${号码}）`);
+      记调试(`NapCat 没在跑，已静默拉起（${目录}，-q ${号码}）`);
     } catch (e) {
       记调试(`拉 NapCat 失败：${e?.message ?? e}`);
       return;
