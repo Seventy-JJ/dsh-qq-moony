@@ -809,6 +809,8 @@ export function apply(ctx, 配置) {
             perHour: Number(c.perHour ?? 20),
             perDay: Number(c.perDay ?? 60),
             sentToday: 记录.filter((t) => 现在 - t < 86400).length,
+            roundsToday: 读账(轮次账).filter((t) => 现在 - t < 86400).length,
+            roundsThisHour: 读账(轮次账).filter((t) => 现在 - t < 3600).length,
             sentThisHour: 记录.filter((t) => 现在 - t < 3600).length,
           });
           return;
@@ -924,17 +926,12 @@ export function apply(ctx, 配置) {
     if (一分钟 >= 上限分钟) return `这一分钟已经发了 ${一分钟} 条，喘口气再说`;
     const 一小时 = 记录.filter((t) => 现在 - t < 3600).length;
     const 一天 = 记录.filter((t) => 现在 - t < 86400).length;
-    // 小时/天的额度按「轮」算（拆条模式下），分钟的硬上限永远按「条」算
+    // 小时/天的额度一律按「轮」算；每分钟的硬上限永远按「条」算
     const 轮记录 = 读账(轮次账);
     const 轮小时 = 轮记录.filter((t) => 现在 - t < 3600).length;
     const 轮一天 = 轮记录.filter((t) => 现在 - t < 86400).length;
-    if (c.splitReply !== false) {
-      if (轮小时 >= c.perHour) return `这一小时已经回了 ${轮小时} 轮，到顶了，等会儿再说`;
-      if (轮一天 >= c.perDay) return `今天已经回了 ${轮一天} 轮，到顶了，明天再聊`;
-      return '';
-    }
-    if (一小时 >= c.perHour) return `这一小时已经发了 ${一小时} 条，到顶了，等会儿再说`;
-    if (一天 >= c.perDay) return `今天已经发了 ${一天} 条，到顶了，明天再聊`;
+    if (轮小时 >= c.perHour) return `这一小时已经回了 ${轮小时} 轮，到顶了，等会儿再说`;
+    if (轮一天 >= c.perDay) return `今天已经回了 ${轮一天} 轮，到顶了，明天再聊`;
     return '';
   }
 
@@ -996,6 +993,8 @@ export function apply(ctx, 配置) {
             uin: Number(r.data?.user_id ?? 0),
             nickname: String(r.data?.nickname ?? ''),
             sentToday: 记录.filter((t) => 现在 - t < 86400).length,
+            roundsToday: 读账(轮次账).filter((t) => 现在 - t < 86400).length,
+            roundsThisHour: 读账(轮次账).filter((t) => 现在 - t < 3600).length,
             sentThisHour: 记录.filter((t) => 现在 - t < 3600).length,
           };
         } catch (e) {

@@ -206,7 +206,7 @@ window.__ModuleLoader__.load({
               'div',
               { style: 说明 },
               状态.online
-                ? `今天发了 ${状态.sentToday} 条，这一小时 ${状态.sentThisHour} 条（上限 ${状态.perDay}/天、${状态.perHour}/时）`
+                ? `今天回了 ${状态.roundsToday ?? 0} 轮（${状态.sentToday ?? 0} 条），这一小时 ${状态.roundsThisHour ?? 0} 轮（上限 ${状态.perDay}/天、${状态.perHour}/时）`
                 : '检查 NapCat 有没有启动、3000 端口通不通、token 对不对',
             ),
           ),
@@ -302,7 +302,7 @@ window.__ModuleLoader__.load({
             'div',
             null,
             h('div', { style: 标题 }, '每小时上限'),
-            h('div', { style: 说明 }, '一小时内最多发几条（1–200），到顶直接拒发'),
+            h('div', { style: 说明 }, '一小时内最多回几轮（1–200），到顶直接拒发'),
           ),
           h('input', {
             type: 'number',
@@ -320,7 +320,7 @@ window.__ModuleLoader__.load({
             'div',
             null,
             h('div', { style: 标题 }, '每天上限'),
-            h('div', { style: 说明 }, '一天内最多发几条（1–1000），按自然日算'),
+            h('div', { style: 说明 }, '一天内最多回几轮（1–1000），按自然日算'),
           ),
           h('input', {
             type: 'number',
