@@ -114,7 +114,7 @@ const 工具输出 = (字段, 渲染) => ({
 });
 
 export function apply(ctx, 配置) {
-  const c = { ...默认配置, ...读取本地配置(), ...(配置 ?? {}) };
+  const c = { ...默认配置, ...(配置 ?? {}), ...读取本地配置() };
   const 账本 = join(家目录(), 'sent.log');
   const 收件箱 = join(家目录(), 'inbox.jsonl');
 
@@ -133,20 +133,38 @@ export function apply(ctx, 配置) {
     return { qqnt, napcat };
   }
 
+  /** 探活：区分「NapCat 在」「端口被别的服务占了」「根本没起来」三种情况。 */
+  async function 探NapCat() {
+    try {
+      const 头 = c.token ? { Authorization: `Bearer ${c.token}` } : {};
+      const r = await fetch(`${c.baseUrl}/get_login_info`, { headers: 头, signal: AbortSignal.timeout(4000) });
+      const 文本 = await r.text();
+      let 体 = null;
+      try {
+        体 = JSON.parse(文本);
+      } catch {
+        /* 不是 JSON，多半是别的服务 */
+      }
+      if (r.ok && 体?.status === 'ok') return 'ok';
+      // 有东西在应答，但不是 OneBot——端口被别的程序占了
+      return 体 ? 'foreign' : 'foreign';
+    } catch {
+      return 'down';
+    }
+  }
+
   /** DSH 起来时顺手看一眼 NapCat：没跑就自己拉起来（免扫码，用 -q 快速登录）。 */
   async function 确认NapCat在跑() {
     if (c.autoStartNapCat === false) return;
-    const 探活 = async () => {
-      try {
-        const 头 = c.token ? { Authorization: `Bearer ${c.token}` } : {};
-        const r = await fetch(`${c.baseUrl}/get_login_info`, { headers: 头, signal: AbortSignal.timeout(4000) });
-        return r.ok;
-      } catch {
-        return false;
-      }
-    };
-    if (await 探活()) {
+
+    const 状态 = await 探NapCat();
+    if (状态 === 'ok') {
       记调试('NapCat 已经在跑，不用拉');
+      return;
+    }
+    if (状态 === 'foreign') {
+      // 端口上坐着别的程序：这时候去拉起 NapCat 只会白折腾
+      记调试(`${c.baseUrl} 上应答的不是 NapCat（多半被别的服务占了），不自动拉起`);
       return;
     }
     const 目录 = c.napCatDir || '';
@@ -179,7 +197,7 @@ export function apply(ctx, 配置) {
     // 给它一点时间登录，最多等一分钟
     for (let i = 0; i < 30; i += 1) {
       await new Promise((r) => setTimeout(r, 2000));
-      if (await 探活()) {
+      if ((await 探NapCat()) === 'ok') {
         记调试(`NapCat 起来了（等了约 ${(i + 1) * 2} 秒）`);
         return;
       }
@@ -668,16 +686,20 @@ export function apply(ctx, 配置) {
           const 记录 = 读账(账本);
           let 在线 = false;
           let 昵称 = '';
-          try {
-            const r = await 调('get_login_info', {});
-            在线 = true;
-            昵称 = String(r.data?.nickname ?? '');
-          } catch {
-            /* 离线就报离线 */
+          在线 = (await 探NapCat()) === 'ok';
+          if (在线) {
+            try {
+              const r = await 调('get_login_info', {});
+              昵称 = String(r.data?.nickname ?? '');
+            } catch {
+              /* 探到了但取名字失败，别当离线 */
+            }
           }
+          const 端口状态 = 在线 ? 'ok' : await 探NapCat();
           发json(res, 200, {
             ok: true,
             online: 在线,
+            portState: 端口状态,
             nickname: 昵称,
             qqnt: 体检().qqnt,
             napcat: 体检().napcat,

@@ -159,7 +159,9 @@ window.__ModuleLoader__.load({
       const 缺口 = [];
       if (!状态.qqnt) 缺口.push('没找到 QQ NT —— 去 im.qq.com 装新版（9.9.x）。老版 9.7 注不进去，这是死条件。');
       if (!状态.napcat) 缺口.push('没找到 NapCat —— 去 github.com/NapNeko/NapCatQQ 下 Shell 版，解压后把 napCatDir 指过去。');
-      if (状态.qqnt && 状态.napcat && !状态.online)
+      if (状态.portState === 'foreign')
+        缺口.push('端口上坐着的不是 NapCat —— 3000 被别的服务占了。换个端口（改 baseUrl），或者把那个服务挪开。');
+      else if (状态.qqnt && 状态.napcat && !状态.online)
         缺口.push('QQ NT 和 NapCat 都在，但连不上 —— 检查 NapCat 启没启、3000 端口、token 三样。');
 
       return h(
