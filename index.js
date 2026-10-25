@@ -60,6 +60,8 @@ const 默认配置 = {
   qzonePrompt: '',
   qzoneEveryMinMin: 120,
   qzoneEveryMinMax: 240,
+  // 人设：留空则用中性说明；填了就把这段当作"你是谁"交给会话
+  persona: '',
   // DSH 启动时自动把 NapCat 拉起来（免扫码，用 -q 快速登录）
   autoStartNapCat: true,
   napCatDir: '',
@@ -280,6 +282,15 @@ export function apply(ctx, 配置) {
 
   const 群下次机会 = new Map();
 
+  /** 投递时给会话的"你是谁"说明：默认中性；填了 persona 才用主人自己写的人设。 */
+  function 身份说明() {
+    const 人设 = String(c.persona ?? '').trim();
+    if (!人设) {
+      return '这是你的 QQ 通道，你替这个账号的主人在 DSH 里收发消息。用账号主人平时的语气说话，别自我介绍。';
+    }
+    return `${人设}\n（同一个工作区、同一份记忆，memory/ 下的文件随时可看。）`;
+  }
+
   /** 把来信投给 QQ 专用会话，让那边的 agent 去回。失败只记日志，不影响收消息。 */
   function 自动回复(记录) {
     记调试(
@@ -319,7 +330,7 @@ export function apply(ctx, 配置) {
     const 回哪里 = 是群 ? `group:${记录.group}` : String(记录.from);
     const 提示 =
       `【QQ ${是群 ? `群 ${记录.group} 里被点名` : '来信'}】${记录.name}（${记录.from}）在 ${记录.t} 说：${描述}\n\n` +
-      `你是溟月，这是你的 QQ 自动回复通道——同一个工作区、同一份记忆，memory/ 下的文件随时可看。\n` +
+      `${身份说明()}\n` +
       `用 qq_send 回给 ${回哪里}${是群 ? '（群里只回一句，别接着聊）' : '，一句就够'}，短，像平时说话那样，别解释你在做什么。回完就停。`;
     const 等待 = c.replyDelayMinMs + Math.random() * Math.max(0, c.replyDelayMaxMs - c.replyDelayMinMs);
     const 记忆 = 读记忆片段();
@@ -658,8 +669,8 @@ export function apply(ctx, 配置) {
     记调试(`空间模式：给它一次发说说的机会（下一次排在 ${Math.round(下次.分钟)} 分钟后）`);
     投递到会话(
       `【QQ 空间】到了看看要不要发条说说的点。\n` +
-        (要求 ? `主人给的要求：${要求}\n` : '没有特别要求：想发就发一条轻的，不想发就结束这一轮。\n') +
-        `想发就用 qq_qzone；只发轻的，不点名、不写具体地点、不提主人。发完就停，别连着发第二条。${记忆 ? `\n\n${记忆}` : ''}`,
+        (要求 ? `账号主人给的要求：${要求}\n` : '没有特别要求：想发就发一条轻的，不想发就结束这一轮。\n') +
+        `想发就用 qq_qzone；只发轻的，不点名、不写具体地点、不提账号主人。发完就停，别连着发第二条。${记忆 ? `\n\n${记忆}` : ''}`,
     );
   }, 60000);
 
@@ -709,6 +720,7 @@ export function apply(ctx, 配置) {
             sessionId: c.sessionId,
             everyMinMin: Number(c.proactiveEveryMinMin ?? 45),
             everyMinMax: Number(c.proactiveEveryMinMax ?? c.proactiveEveryMin ?? 90),
+            persona: String(c.persona ?? ''),
             qzoneAuto: Boolean(c.qzoneAuto),
             qzonePrompt: String(c.qzonePrompt ?? ''),
             qzoneMinMin: Number(c.qzoneEveryMinMin ?? 120),
@@ -748,6 +760,7 @@ export function apply(ctx, 配置) {
           if (Number.isFinite(想要.everyMinMax)) patch.proactiveEveryMinMax = Math.max(5, Math.round(Number(想要.everyMinMax)));
           if (Number.isFinite(想要.perHour)) patch.perHour = Math.min(200, Math.max(1, Math.round(Number(想要.perHour))));
           if (Number.isFinite(想要.perDay)) patch.perDay = Math.min(1000, Math.max(1, Math.round(Number(想要.perDay))));
+          if (typeof 想要.persona === 'string') patch.persona = 想要.persona.slice(0, 2000);
           if (typeof 想要.qzoneAuto === 'boolean') patch.qzoneAuto = 想要.qzoneAuto;
           if (typeof 想要.qzonePrompt === 'string') patch.qzonePrompt = 想要.qzonePrompt.slice(0, 2000);
           if (Number.isFinite(想要.qzoneMinMin)) patch.qzoneEveryMinMin = Math.max(10, Math.round(Number(想要.qzoneMinMin)));
