@@ -61,6 +61,9 @@ const 默认配置 = {
   qzonePrompt: '',
   qzoneEveryMinMin: 120,
   qzoneEveryMinMax: 240,
+  // 对方连发几条时：静默多少秒算说完，最长等多久
+  mergeWaitSec: 8,
+  mergeMaxWaitSec: 30,
   // 一轮回复拆成几条发（像人一句一句说）
   splitReply: true,
   maxMessagesPerRound: 4,
@@ -352,6 +355,51 @@ export function apply(ctx, 配置) {
     );
   }
 
+  /** 私聊攒批：同一个人连着发，等他说完再一口气回一次。 */
+  const 私聊攒着 = new Map();
+
+  function 攒私聊(记录) {
+    const 键 = String(记录.from);
+    let 桶 = 私聊攒着.get(键);
+    if (!桶) {
+      桶 = { 列表: [], 首次: Date.now(), 定时器: null };
+      私聊攒着.set(键, 桶);
+    }
+    桶.列表.push(记录);
+    if (桶.定时器) clearTimeout(桶.定时器);
+    const 静默 = Math.max(1, Number(c.mergeWaitSec ?? 8)) * 1000;
+    const 上限 = Math.max(静默, Number(c.mergeMaxWaitSec ?? 30) * 1000);
+    const 抖 = c.replyDelayMinMs + Math.random() * Math.max(0, c.replyDelayMaxMs - c.replyDelayMinMs);
+    const 剩余 = Math.max(600, 桶.首次 + 上限 - Date.now());
+    const 等 = Math.min(静默, 剩余) + 抖;
+    记调试(`攒着 ${桶.列表.length} 条（${键}），${Math.round(等)}ms 后一起回`);
+    桶.定时器 = setTimeout(() => {
+      私聊攒着.delete(键);
+      一起回(桶.列表).catch((e) => 记调试(`一起回失败：${e?.message ?? e}`));
+    }, 等);
+  }
+
+  async function 一起回(列表) {
+    if (列表.length === 0) return;
+    const 谁 = 列表[列表.length - 1];
+    const 行 = 列表
+      .map((x) => {
+        const 图 = (x.attachments ?? []).filter((a) => a.path).map((a) => a.path);
+        const 内容 = 图.length > 0 ? `${x.text}（图片已存到 ${图.join('、')}，要看就 read_image）` : x.text;
+        return `- ${x.t}：${内容}`;
+      })
+      .join('\n');
+    const 提示 =
+      `【QQ 来信】${谁.name}（${谁.from}）连着发了 ${列表.length} 条，这是一整段话：\n${行}\n\n` +
+      `${身份说明()}\n` +
+      `把这些当成他说的一整段，一次答完，不要一条一条对应着回。用 qq_send 回给 ${谁.from}，短，像平时说话那样，别解释你在做什么。回完就停。` +
+      (c.stickerOnReply === false
+        ? ''
+        : `\n如果这句适合配一张图，可以先用 qq_pick_sticker 按情绪/用途挑一张；挑不到就别配。`);
+    const 记忆 = 读记忆片段();
+    记调试(`一起回：${列表.length} 条，投给 ${c.sessionId}（记忆 ${记忆.length} 字）`);
+    await 投递到会话(记忆 ? `${提示}\n\n${记忆}` : 提示);
+  }
   /** 把来信投给 QQ 专用会话，让那边的 agent 去回。失败只记日志，不影响收消息。 */
   function 自动回复(记录) {
     记调试(
@@ -384,6 +432,11 @@ export function apply(ctx, 配置) {
     } else {
       const 白名单 = Array.isArray(c.replyTo) ? c.replyTo.map(String) : [];
       if (白名单.length > 0 && !白名单.includes(String(记录.from))) return;
+    }
+    // 私聊不走"一条一回"，先攒起来，等对方说完再集中回一次
+    if (记录.kind !== 'group') {
+      攒私聊(记录);
+      return;
     }
     const 图 = (记录.attachments ?? []).filter((a) => a.path).map((a) => a.path);
     const 描述 = 图.length > 0 ? `${记录.text}（图片已存到 ${图.join('、')}，要看就 read_image）` : 记录.text;
@@ -802,6 +855,8 @@ export function apply(ctx, 配置) {
             limitsUnlimited: c.limitsUnlimited === true,
             stickerOnReply: c.stickerOnReply !== false,
             autoTagStickers: c.autoTagStickers !== false,
+            mergeWaitSec: Number(c.mergeWaitSec ?? 8),
+            mergeMaxWaitSec: Number(c.mergeMaxWaitSec ?? 30),
             splitReply: c.splitReply !== false,
             maxPerRound: Number(c.maxMessagesPerRound ?? 4),
             perMinute: Number(c.perMinute ?? 6),
@@ -865,6 +920,8 @@ export function apply(ctx, 配置) {
           if (typeof 想要.limitsUnlimited === 'boolean') patch.limitsUnlimited = 想要.limitsUnlimited;
           if (typeof 想要.stickerOnReply === 'boolean') patch.stickerOnReply = 想要.stickerOnReply;
           if (typeof 想要.autoTagStickers === 'boolean') patch.autoTagStickers = 想要.autoTagStickers;
+          if (Number.isFinite(想要.mergeWaitSec)) patch.mergeWaitSec = Math.min(60, Math.max(2, Math.round(Number(想要.mergeWaitSec))));
+          if (Number.isFinite(想要.mergeMaxWaitSec)) patch.mergeMaxWaitSec = Math.min(600, Math.max(5, Math.round(Number(想要.mergeMaxWaitSec))));
           if (typeof 想要.splitReply === 'boolean') patch.splitReply = 想要.splitReply;
           if (Number.isFinite(想要.maxPerRound)) patch.maxMessagesPerRound = Math.min(8, Math.max(1, Math.round(Number(想要.maxPerRound))));
           if (Number.isFinite(想要.perMinute)) patch.perMinute = Math.min(60, Math.max(1, Math.round(Number(想要.perMinute))));
