@@ -100,58 +100,62 @@ window.__ModuleLoader__.load({
       const [草稿, 设草稿] = React.useState(null);
       const [脏, 设脏] = React.useState(false);
 
+      // 草稿没建起来之前，先用状态里的值兜底——省得"保存"之后闪回空白
+      const 从状态取 = () => ({
+        everyMinMin: 状态?.everyMinMin ?? 45,
+        everyMinMax: 状态?.everyMinMax ?? 90,
+        perHour: 状态?.perHour ?? 20,
+        perDay: 状态?.perDay ?? 60,
+        qzoneMinMin: 状态?.qzoneMinMin ?? 120,
+        qzoneMinMax: 状态?.qzoneMinMax ?? 240,
+        qzonePrompt: 状态?.qzonePrompt ?? '',
+        groupWhitelist: (状态?.groupWhitelist ?? []).join(' '),
+        groupContextSize: 状态?.groupContextSize ?? 30,
+        groupEveryMinMin: 状态?.groupEveryMinMin ?? 8,
+        groupEveryMinMax: 状态?.groupEveryMinMax ?? 20,
+        groupActiveWindowMin: 状态?.groupActiveWindowMin ?? 5,
+        groupCooldownMin: 状态?.groupCooldownMin ?? 10,
+        groupPerDay: 状态?.groupPerDay ?? 20,
+      });
+
       React.useEffect(() => {
         if (状态 && 草稿 === null) {
-          设草稿({
-            everyMinMin: 状态.everyMinMin ?? 45,
-            everyMinMax: 状态.everyMinMax ?? 90,
-            perHour: 状态.perHour ?? 20,
-            perDay: 状态.perDay ?? 60,
-            qzoneMinMin: 状态.qzoneMinMin ?? 120,
-            qzoneMinMax: 状态.qzoneMinMax ?? 240,
-            qzonePrompt: 状态.qzonePrompt ?? '',
-            groupWhitelist: (状态.groupWhitelist ?? []).join(' '),
-            groupContextSize: 状态.groupContextSize ?? 30,
-            groupEveryMinMin: 状态.groupEveryMinMin ?? 8,
-            groupEveryMinMax: 状态.groupEveryMinMax ?? 20,
-            groupActiveWindowMin: 状态.groupActiveWindowMin ?? 5,
-            groupCooldownMin: 状态.groupCooldownMin ?? 10,
-            groupPerDay: 状态.groupPerDay ?? 20,
-          });
+          设草稿(从状态取());
         }
       }, [状态, 草稿]);
 
-      const 数字 = (键, 值) => {
-        设草稿((旧) => ({ ...(旧 ?? {}), [键]: 值 }));
+      const 数字 = (键, 新值) => {
+        设草稿((旧) => ({ ...(旧 ?? 从状态取()), [键]: 新值 }));
         设脏(true);
       };
 
       const 保存 = async () => {
-        if (!草稿) return;
+        const 值 = 草稿 ?? 从状态取();
         await 改({
-          everyMinMin: Number(草稿.everyMinMin),
-          everyMinMax: Number(草稿.everyMinMax),
-          perHour: Number(草稿.perHour),
-          perDay: Number(草稿.perDay),
-          qzoneMinMin: Number(草稿.qzoneMinMin),
-          qzoneMinMax: Number(草稿.qzoneMinMax),
-          qzonePrompt: String(草稿.qzonePrompt ?? ''),
-          groupWhitelist: String(草稿.groupWhitelist ?? ''),
-          groupContextSize: Number(草稿.groupContextSize),
-          groupEveryMinMin: Number(草稿.groupEveryMinMin),
-          groupEveryMinMax: Number(草稿.groupEveryMinMax),
-          groupActiveWindowMin: Number(草稿.groupActiveWindowMin),
-          groupCooldownMin: Number(草稿.groupCooldownMin),
-          groupPerDay: Number(草稿.groupPerDay),
+          everyMinMin: Number(值.everyMinMin),
+          everyMinMax: Number(值.everyMinMax),
+          perHour: Number(值.perHour),
+          perDay: Number(值.perDay),
+          qzoneMinMin: Number(值.qzoneMinMin),
+          qzoneMinMax: Number(值.qzoneMinMax),
+          qzonePrompt: String(值.qzonePrompt ?? ''),
+          groupWhitelist: String(值.groupWhitelist ?? ''),
+          groupContextSize: Number(值.groupContextSize),
+          groupEveryMinMin: Number(值.groupEveryMinMin),
+          groupEveryMinMax: Number(值.groupEveryMinMax),
+          groupActiveWindowMin: Number(值.groupActiveWindowMin),
+          groupCooldownMin: Number(值.groupCooldownMin),
+          groupPerDay: Number(值.groupPerDay),
         });
         设脏(false);
         设草稿(null);
       };
 
-      if (状态 === null || 草稿 === null) {
+      if (状态 === null) {
         return h('div', { style: { padding: '8px 0', opacity: 0.6 } }, 错 || '读状态中…');
       }
 
+      const 值 = 草稿 ?? 从状态取();
       const 缺口 = [];
       if (!状态.qqnt) 缺口.push('没找到 QQ NT —— 去 im.qq.com 装新版（9.9.x）。老版 9.7 注不进去，这是死条件。');
       if (!状态.napcat) 缺口.push('没找到 NapCat —— 去 github.com/NapNeko/NapCatQQ 下 Shell 版，解压后把 napCatDir 指过去。');
@@ -204,7 +208,7 @@ window.__ModuleLoader__.load({
             'div',
             null,
             h('div', { style: 标题 }, '主动说话'),
-            h('div', { style: 说明 }, `开着它才会自己找你，大约每 ${草稿.everyMinMin}–${草稿.everyMinMax} 分钟有机会开口一次；关掉就只回不发`),
+            h('div', { style: 说明 }, `开着它才会自己找你，大约每 ${值.everyMinMin}–${值.everyMinMax} 分钟有机会开口一次；关掉就只回不发`),
           ),
           h(开关, { 开: 状态.proactive, 点: () => 改({ proactive: !状态.proactive }) }),
         ),
@@ -234,7 +238,7 @@ window.__ModuleLoader__.load({
             h('input', {
               type: 'number',
               min: 5,
-              value: 草稿.everyMinMin,
+              value: 值.everyMinMin,
               onChange: (e) => 数字('everyMinMin', Number(e.target.value)),
               style: { ...输入框, width: '78px' },
             }),
@@ -242,7 +246,7 @@ window.__ModuleLoader__.load({
             h('input', {
               type: 'number',
               min: 5,
-              value: 草稿.everyMinMax,
+              value: 值.everyMinMax,
               onChange: (e) => 数字('everyMinMax', Number(e.target.value)),
               style: { ...输入框, width: '78px' },
             }),
@@ -261,7 +265,7 @@ window.__ModuleLoader__.load({
             type: 'number',
             min: 1,
             max: 200,
-            value: 草稿.perHour,
+            value: 值.perHour,
             onChange: (e) => 数字('perHour', Number(e.target.value)),
             style: 输入框,
           }),
@@ -279,7 +283,7 @@ window.__ModuleLoader__.load({
             type: 'number',
             min: 1,
             max: 1000,
-            value: 草稿.perDay,
+            value: 值.perDay,
             onChange: (e) => 数字('perDay', Number(e.target.value)),
             style: 输入框,
           }),
@@ -305,7 +309,7 @@ window.__ModuleLoader__.load({
           ),
           h('input', {
             type: 'text',
-            value: 草稿.groupWhitelist,
+            value: 值.groupWhitelist,
             placeholder: '群号白名单，空格或逗号分隔；空着 = 群聊不生效',
             onChange: (e) => 数字('groupWhitelist', e.target.value),
             style: { ...输入框, width: '100%', boxSizing: 'border-box' },
@@ -318,7 +322,7 @@ window.__ModuleLoader__.load({
               type: 'number',
               min: 5,
               max: 100,
-              value: 草稿.groupContextSize,
+              value: 值.groupContextSize,
               onChange: (e) => 数字('groupContextSize', Number(e.target.value)),
               style: { ...输入框, width: '70px' },
             }),
@@ -326,7 +330,7 @@ window.__ModuleLoader__.load({
             h('input', {
               type: 'number',
               min: 2,
-              value: 草稿.groupEveryMinMin,
+              value: 值.groupEveryMinMin,
               onChange: (e) => 数字('groupEveryMinMin', Number(e.target.value)),
               style: { ...输入框, width: '70px' },
             }),
@@ -334,7 +338,7 @@ window.__ModuleLoader__.load({
             h('input', {
               type: 'number',
               min: 2,
-              value: 草稿.groupEveryMinMax,
+              value: 值.groupEveryMinMax,
               onChange: (e) => 数字('groupEveryMinMax', Number(e.target.value)),
               style: { ...输入框, width: '70px' },
             }),
@@ -342,7 +346,7 @@ window.__ModuleLoader__.load({
             h('input', {
               type: 'number',
               min: 1,
-              value: 草稿.groupActiveWindowMin,
+              value: 值.groupActiveWindowMin,
               onChange: (e) => 数字('groupActiveWindowMin', Number(e.target.value)),
               style: { ...输入框, width: '70px' },
             }),
@@ -355,7 +359,7 @@ window.__ModuleLoader__.load({
             h('input', {
               type: 'number',
               min: 1,
-              value: 草稿.groupCooldownMin,
+              value: 值.groupCooldownMin,
               onChange: (e) => 数字('groupCooldownMin', Number(e.target.value)),
               style: { ...输入框, width: '70px' },
             }),
@@ -363,7 +367,7 @@ window.__ModuleLoader__.load({
             h('input', {
               type: 'number',
               min: 1,
-              value: 草稿.groupPerDay,
+              value: 值.groupPerDay,
               onChange: (e) => 数字('groupPerDay', Number(e.target.value)),
               style: { ...输入框, width: '70px' },
             }),
@@ -389,7 +393,7 @@ window.__ModuleLoader__.load({
             ),
             h('textarea', {
               rows: 3,
-              value: 草稿.qzonePrompt,
+              value: 值.qzonePrompt,
               placeholder: '例：一周发一次，写点最近的感受，两三句，不要提具体的人和地点',
               onChange: (e) => 数字('qzonePrompt', e.target.value),
               style: {
@@ -413,7 +417,7 @@ window.__ModuleLoader__.load({
               h('input', {
                 type: 'number',
                 min: 10,
-                value: 草稿.qzoneMinMin,
+                value: 值.qzoneMinMin,
                 onChange: (e) => 数字('qzoneMinMin', Number(e.target.value)),
                 style: { ...输入框, width: '78px' },
               }),
@@ -421,7 +425,7 @@ window.__ModuleLoader__.load({
               h('input', {
                 type: 'number',
                 min: 10,
-                value: 草稿.qzoneMinMax,
+                value: 值.qzoneMinMax,
                 onChange: (e) => 数字('qzoneMinMax', Number(e.target.value)),
                 style: { ...输入框, width: '78px' },
               }),
