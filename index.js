@@ -9,7 +9,7 @@
  * 不做的：装 NapCat、注入 QQ、开协议端口。那些得用户自己先备好，
  * 本插件只当“手”，不当“腿”。
  */
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -206,6 +206,65 @@ export function apply(ctx, 配置) {
     }
   }
 
+
+
+  /** 数一下 QQ 进程：总共有几个、其中几个带着 NapCat 的 hook。 */
+  function 数QQ进程() {
+    try {
+      const 全部 = execFileSync('tasklist', ['/fi', 'IMAGENAME eq QQ.exe'], { encoding: 'utf8', timeout: 8000 });
+      const 总数 = (全部.match(/QQ\.exe/g) || []).length;
+      const 带钩文本 = execFileSync('tasklist', ['/m', 'NapCatWinBootHook.dll'], { encoding: 'utf8', timeout: 8000 });
+      const 带钩 = (带钩文本.match(/QQ\.exe/g) || []).length;
+      return { 总数, 带钩 };
+    } catch {
+      return null;
+    }
+  }
+
+
+  /** 连接失败时，把看到的情况一句话讲清楚。 */
+  function 失败说明() {
+    const 况 = 数QQ进程();
+    if (!况) return '一分钟内没起来，也没查到 QQ 进程的状态。';
+    if (况.总数 === 0) return '一分钟内没起来：现在一个 QQ 进程都没有。可能是 NapCat 启动失败，或者 QQ 路径不对。';
+    if (况.带钩 === 0) return `一分钟内没起来：现在有 ${况.总数} 个 QQ 进程，但**没有一个带着 NapCat 的 hook**——说明这些是普通登录的 QQ，得先把它们全退掉，再点一次。`;
+    return `一分钟内没起来：现在有 ${况.总数} 个 QQ 进程，其中 ${况.带钩} 个带着 hook（旧的实例占着注入点）。**把 QQ 全部退出**，再点一次。`;
+  }
+
+  /** 真去把 NapCat 拉起来，并等它连上（最多 60 秒）。返回 true/false。 */
+  async function 拉起NapCat() {
+    const 目录 = c.napCatDir || '';
+    const 号码 = String(c.qqUin || c.uin || '');
+    if (!目录 || !号码) {
+      记调试('没配 napCatDir / uin，拉不起来');
+      return false;
+    }
+    try {
+      const 启动脚本 = join(家目录(), 'start-napcat.vbs');
+      mkdirSync(家目录(), { recursive: true });
+      const 批处理 = join(目录, 'launcher-user.bat');
+      const vbs =
+        `Set sh = CreateObject("WScript.Shell")\r\n` +
+        `sh.Run "cmd /c ""${批处理}"" -q ${号码}", 0, False\r\n`;
+      writeFileSync(启动脚本, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(vbs, 'utf16le')]));
+      const 子 = spawn('wscript.exe', [启动脚本], { detached: true, stdio: 'ignore', windowsHide: true });
+      子.unref();
+      记调试(`已静默拉起 NapCat（${目录}，-q ${号码}）`);
+    } catch (e) {
+      记调试(`拉 NapCat 失败：${e?.message ?? e}`);
+      return false;
+    }
+    for (let i = 0; i < 30; i += 1) {
+      await new Promise((r) => setTimeout(r, 2000));
+      if ((await 探NapCat()) === 'ok') {
+        记调试(`NapCat 起来了（等了约 ${(i + 1) * 2} 秒）`);
+        return true;
+      }
+    }
+    记调试('拉起来了但一分钟内没连上，可能卡在 QQ 登录');
+    return false;
+  }
+
   /** DSH 起来时顺手看一眼 NapCat：没跑就自己拉起来（免扫码，用 -q 快速登录）。 */
   async function 确认NapCat在跑() {
     if (c.autoStartNapCat === false) return;
@@ -342,10 +401,23 @@ export function apply(ctx, 配置) {
     return `${人设}\n（同一个工作区、同一份记忆，memory/ 下的文件随时可看。）`;
   }
 
+  /** 把附件说清楚：图给 read_image，文件给 read。 */
+  function 附件说明(记录) {
+    const 附件 = 记录.attachments ?? [];
+    const 图 = 附件.filter((a) => a.type === 'image' && a.path).map((a) => a.path);
+    const 文件 = 附件.filter((a) => a.type === 'file' && a.path);
+    const 没收下 = 附件.filter((a) => !a.path);
+    const 片段 = [];
+    if (图.length > 0) 片段.push(`图片已存到 ${图.join('、')}，要看就 read_image`);
+    if (文件.length > 0)
+      片段.push(`文件已存到 ${文件.map((x) => `${x.path}（${x.name}）`).join('、')}，要读就 read`);
+    if (没收下.length > 0) 片段.push(`有 ${没收下.length} 个附件没取下来（可能过期或类型不支持）`);
+    return 片段.length > 0 ? `${记录.text}（${片段.join('；')}）` : 记录.text;
+  }
   /** 收到图之后：值不值得收进表情库，让它自己判断。 */
   function 鉴定表情包(记录) {
     if (c.autoTagStickers === false) return;
-    const 图 = (记录.attachments ?? []).filter((a) => a.path).map((a) => a.path);
+    const 图 = (记录.attachments ?? []).filter((a) => a.type === 'image' && a.path).map((a) => a.path);
     if (图.length === 0) return;
     const 清单 = 图.map((p) => `- ${p}`).join('\n');
     投递到会话(
@@ -384,8 +456,8 @@ export function apply(ctx, 配置) {
     const 谁 = 列表[列表.length - 1];
     const 行 = 列表
       .map((x) => {
-        const 图 = (x.attachments ?? []).filter((a) => a.path).map((a) => a.path);
-        const 内容 = 图.length > 0 ? `${x.text}（图片已存到 ${图.join('、')}，要看就 read_image）` : x.text;
+
+        const 内容 = 附件说明(x);
         return `- ${x.t}：${内容}`;
       })
       .join('\n');
@@ -438,8 +510,8 @@ export function apply(ctx, 配置) {
       攒私聊(记录);
       return;
     }
-    const 图 = (记录.attachments ?? []).filter((a) => a.path).map((a) => a.path);
-    const 描述 = 图.length > 0 ? `${记录.text}（图片已存到 ${图.join('、')}，要看就 read_image）` : 记录.text;
+    const 描述 = 附件说明(记录);
+
     const 是群 = 记录.kind === 'group';
     const 回哪里 = 是群 ? `group:${记录.group}` : String(记录.from);
     const 提示 =
@@ -558,11 +630,44 @@ export function apply(ctx, 配置) {
     }
   }
 
+  function 段落转文字(段) {
+    const 类 = 段?.type ?? '?';
+    if (类 === 'text') return String(段?.data?.text ?? '');
+    if (类 === 'json') return 卡片摘要(段?.data);
+    if (类 === 'file') return `[文件：${String(段?.data?.file ?? 段?.data?.name ?? '')}]`;
+    return `[${类}]`;
+  }
+
+  /** 卡片（json 段）里能读出来的东西：标题、描述、链接。 */
+  function 卡片摘要(数据) {
+    const 原文 = String(数据?.data ?? '');
+    let 体 = null;
+    try {
+      体 = JSON.parse(原文);
+    } catch {
+      /* 不是 JSON 就只留原文 */
+    }
+    const 夹 = (obj) => {
+      for (const 键 of ['prompt', 'summary', 'desc', 'title', 'content']) {
+        const v = obj?.[键];
+        if (typeof v === 'string' && v.trim()) return v.trim();
+      }
+      return '';
+    };
+    const 题 = 夹(体) || 夹(体?.meta) || '';
+    const 链 = String(体?.meta?.qqdocurl ?? 体?.jumpUrl ?? 体?.meta?.jumpUrl ?? 体?.url ?? '');
+    const 应用 = String(体?.app ?? '');
+    const 块 = [`[卡片${应用 ? `：${应用}` : ''}]`];
+    if (题) 块.push(题);
+    if (链) 块.push(链);
+    if (!题 && !链 && 原文) 块.push(原文.slice(0, 200));
+    return 块.join(' ');
+  }
   function 取文本(message) {
     if (typeof message === 'string') return message;
     if (!Array.isArray(message)) return '';
     return message
-      .map((段) => (段?.type === 'text' ? String(段?.data?.text ?? '') : `[${段?.type ?? '?'}]`))
+      .map((段) => 段落转文字(段))
       .join('');
   }
 
@@ -571,7 +676,48 @@ export function apply(ctx, 配置) {
     const 附件 = [];
     if (!Array.isArray(message)) return 附件;
     for (const 段 of message) {
-      if (!段 || 段.type !== 'image') continue;
+      if (!段) continue;
+      if (段.type === 'file') {
+        // 文件：优先用 url 直接抓；没有 url 就走 NapCat 的 get_file（回 base64）
+        const 数据 = 段.data ?? {};
+        const 原名 = String(数据.file ?? 数据.name ?? `file-${时间戳}.bin`).split(/[\\/]/).pop();
+        const 目录 = join(家目录(), 'files');
+        try {
+          mkdirSync(目录, { recursive: true });
+          const 落盘 = join(目录, `${时间戳}-${原名}`);
+          let 写好了 = false;
+          if (数据.url) {
+            const 响应 = await fetch(String(数据.url), { signal: AbortSignal.timeout(30000) });
+            if (响应.ok) {
+              writeFileSync(落盘, Buffer.from(await 响应.arrayBuffer()));
+              写好了 = true;
+            }
+          }
+          if (!写好了 && 数据.file_id) {
+            const r = await 调('get_file', { file_id: 数据.file_id });
+            const 内容 = String(r.data?.base64 ?? '');
+            if (内容) {
+              writeFileSync(落盘, Buffer.from(内容, 'base64'));
+              写好了 = true;
+            } else if (r.data?.file && existsSync(String(r.data.file))) {
+              writeFileSync(落盘, readFileSync(String(r.data.file)));
+              写好了 = true;
+            }
+          }
+          if (写好了) {
+            附件.push({ type: 'file', path: 落盘, name: 原名, size: Number(数据.file_size ?? 0) });
+            记调试(`收到文件：${原名} → ${落盘}`);
+          } else {
+            记调试(`收到文件但没取下来：${原名}（file_id=${String(数据.file_id ?? '')}）`);
+            附件.push({ type: 'file', path: '', name: 原名, size: Number(数据.file_size ?? 0) });
+          }
+        } catch (e) {
+          记调试(`文件没下下来：${e?.message ?? e}`);
+          附件.push({ type: 'file', path: '', name: 原名, size: 0 });
+        }
+        continue;
+      }
+      if (段.type !== 'image') continue;
       const url = String(段.data?.url ?? 段.data?.file ?? '');
       if (!url) continue;
       try {
@@ -622,7 +768,15 @@ export function apply(ctx, 配置) {
       if (事件?.post_type !== 'message') return;
       try {
         const 时间戳 = Date.now();
-        记调试(`收到 ${事件.message_type} 消息：${JSON.stringify(事件.message).slice(0, 200)}`);
+    记调试(`收到 ${事件.message_type} 消息：${JSON.stringify(事件.message).slice(0, 200)}`);
+    // 卡片原样留一份，方便后面看它到底带了什么（按钮、token、jumpUrl）
+    try {
+      if (Array.isArray(事件.message) && 事件.message.some((s) => s?.type === "json")) {
+        记调试(`卡片原文：${JSON.stringify(事件.message)}`.slice(0, 6000));
+      }
+    } catch {
+      /* 记不下来不影响收消息 */
+    }
         const 附件 = await 取媒体(事件.message, 时间戳);
         const 文本 = 取文本(事件.message).trim();
         if (!文本 && 附件.length === 0) return;
@@ -853,6 +1007,7 @@ export function apply(ctx, 配置) {
             groupCooldownMin: Number(c.groupCooldownMin ?? 10),
             groupPerDay: Number(c.groupPerDay ?? 20),
             limitsUnlimited: c.limitsUnlimited === true,
+            qqProcess: 数QQ进程(),
             stickerOnReply: c.stickerOnReply !== false,
             autoTagStickers: c.autoTagStickers !== false,
             mergeWaitSec: Number(c.mergeWaitSec ?? 8),
@@ -872,7 +1027,43 @@ export function apply(ctx, 配置) {
           return;
         }
 
+
+        if (路径 === '/api/qq-moony/connect' && req.method === 'POST') {
+          const 现状态 = await 探NapCat();
+          if (现状态 === 'ok') {
+            发json(res, 200, { ok: true, state: 'ok', message: '已经连着' });
+            return;
+          }
+          if (现状态 === 'foreign') {
+            发json(res, 200, {
+              ok: false,
+              state: 'foreign',
+              message: '端口上坐着的不是 NapCat，先把它挪开或者改端口',
+            });
+            return;
+          }
+          记调试('界面点了「一键连接」');
+          const 成了 = await 拉起NapCat();
+          发json(res, 200, {
+            ok: 成了,
+            state: 成了 ? 'ok' : 'down',
+            message: 成了 ? '连上了' : 失败说明(),
+            detail: 成了 ? null : 数QQ进程(),
+          });
+          return;
+        }
+
         if (路径 === '/api/qq-moony/version') {
+          // 逐段比数字：1.10.0 比 1.9.0 新（直接比字符串会错）；预发布标识不参与
+          const 比版本新 = (甲, 乙) => {
+            const 拆 = (v) => String(v).replace(/^v/i, '').split('.').map((s) => parseInt(s, 10) || 0);
+            const a = 拆(甲);
+            const b = 拆(乙);
+            for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+              if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+            }
+            return false;
+          };
           let 本版 = '';
           try {
             本版 = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version ?? '';
@@ -894,7 +1085,7 @@ export function apply(ctx, 配置) {
             ok: true,
             installed: 本版,
             latest: 最新,
-            hasUpdate: Boolean(本版 && 最新 && 最新 !== 本版),
+            hasUpdate: Boolean(本版 && 最新 && 比版本新(最新, 本版)),
             note: 说明,
           });
           return;

@@ -101,7 +101,15 @@ window.__ModuleLoader__.load({
       const [草稿, 设草稿] = React.useState(null);
       const [脏, 设脏] = React.useState(false);
       const [版本, 设版本] = React.useState(null);
-      const [版本忽略, 设版本忽略] = React.useState(false);
+      // 「以后再说」记到 localStorage，等 npm 上再出新版本才重新提醒
+      const [跳过版本, 设跳过版本] = React.useState(() => {
+        try {
+          return localStorage.getItem('qq-moony:skip-version') ?? '';
+        } catch {
+          return '';
+        }
+      });
+      const [连接中, 设连接中] = React.useState(false);
 
       // 草稿没建起来之前，先用状态里的值兜底——省得"保存"之后闪回空白
       const 从状态取 = () => ({
@@ -136,6 +144,21 @@ window.__ModuleLoader__.load({
       const 数字 = (键, 新值) => {
         设草稿((旧) => ({ ...(旧 ?? 从状态取()), [键]: 新值 }));
         设脏(true);
+      };
+
+      const 一键连接 = async () => {
+        if (连接中) return;
+        设连接中(true);
+        try {
+          const r = await fetch('/api/qq-moony/connect', { method: 'POST' });
+          const j = await r.json();
+          设置错(j.ok ? '' : String(j.message ?? '没连上'));
+          await 刷新();
+        } catch (e) {
+          设置错(String(e?.message ?? e));
+        } finally {
+          设连接中(false);
+        }
       };
 
       const 保存 = async () => {
@@ -179,9 +202,50 @@ window.__ModuleLoader__.load({
       else if (状态.qqnt && 状态.napcat && !状态.online)
         缺口.push('QQ NT 和 NapCat 都在，但连不上 —— 检查 NapCat 启没启、3000 端口、token 三样。');
 
+      const 以后再说 = () => {
+        设跳过版本(版本?.latest ?? '');
+        try {
+          localStorage.setItem('qq-moony:skip-version', 版本?.latest ?? '');
+        } catch {
+          /* 存不上就只忽略这一次 */
+        }
+      };
+
       const 内容 = () => h(
         'div',
         null,
+        (版本?.hasUpdate && 版本.latest && 跳过版本 !== 版本.latest
+          ? h(
+              'div',
+              {
+                style: {
+                  ...卡片,
+                  borderColor: 'var(--dsw-alias-accent-1, #4d8dff)',
+                  alignItems: 'flex-start',
+                  flexWrap: 'wrap',
+                },
+              },
+              h(
+                'div',
+                { style: { flex: 1, minWidth: '220px' } },
+                h('div', { style: 标题 }, `有新版本：${版本.latest}`),
+                h(
+                  'div',
+                  { style: 说明 },
+                  `现在装的是 ${版本.installed}。只提醒，不替你更新——按当初装它的方式重装一遍就是新版。`,
+                ),
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  onClick: 以后再说,
+                  style: { ...输入框, width: 'auto', cursor: 'pointer' },
+                },
+                '以后再说',
+              ),
+            )
+          : null),
         缺口.length > 0
           ? h(
               'div',
@@ -199,7 +263,32 @@ window.__ModuleLoader__.load({
                 { style: { ...标题, color: 'var(--dsw-alias-warning-1, #d99b2b)' } },
                 '还差几步才能用',
               ),
+              (() => {
+                const 况 = 状态.qqProcess;
+                if (!况 || !况.总数) return null;
+                return h(
+                  'div',
+                  { style: 说明 },
+                  `现在有 ${况.总数} 个 QQ 进程${况.带钩 ? `，其中 ${况.带钩} 个带着 NapCat 的 hook` : '，没有一个带 hook'}。`,
+                );
+              })(),
               缺口.map((行, i) => h('div', { key: i, style: 说明 }, `${i + 1}. ${行}`)),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  disabled: 连接中,
+                  onClick: 一键连接,
+                  style: {
+                    ...输入框,
+                    width: 'auto',
+                    marginTop: '6px',
+                    cursor: 连接中 ? 'default' : 'pointer',
+                    opacity: 连接中 ? 0.6 : 1,
+                  },
+                },
+                连接中 ? '正在连接…（最多等一分钟）' : '一键连接',
+              ),
             )
           : null,
         h(
